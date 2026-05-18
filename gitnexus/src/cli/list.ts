@@ -5,9 +5,23 @@
  */
 
 import { listRegisteredRepos } from '../storage/repo-manager.js';
+import { isLocalRepoPathAllowed, writeSecurityAudit } from '../security/local-policy.js';
 
 export const listCommand = async () => {
-  const entries = await listRegisteredRepos({ validate: true });
+  const allEntries = await listRegisteredRepos({ validate: true });
+  const entries = allEntries.filter((entry) => {
+    const allowed = isLocalRepoPathAllowed(entry.path);
+    if (!allowed) {
+      writeSecurityAudit({
+        type: 'cli-list-repo-scope-policy',
+        repo: entry.name,
+        path: entry.path,
+        allowed,
+        reason: 'repo-path-denylist',
+      });
+    }
+    return allowed;
+  });
 
   if (entries.length === 0) {
     console.log('No indexed repositories found.');

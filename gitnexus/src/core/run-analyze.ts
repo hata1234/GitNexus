@@ -53,7 +53,7 @@ import type { CachedEmbedding } from './embeddings/types.js';
 import { generateAIContextFiles } from '../cli/ai-context.js';
 import { EMBEDDING_TABLE_NAME } from './lbug/schema.js';
 import { STALE_HASH_SENTINEL } from './lbug/schema.js';
-import { assertIndexAllowed } from '../security/local-policy.js';
+import { assertIndexAllowed, assertLocalRepoPathAllowed } from '../security/local-policy.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -179,8 +179,8 @@ export async function runFullAnalysis(
   const progress = (phase: string, percent: number, message: string) =>
     callbacks.onProgress(phase, percent, message);
 
+  assertLocalRepoPathAllowed(repoPath);
   const { storagePath, lbugPath } = getStoragePaths(repoPath);
-
   await assertIndexAllowed(repoPath);
 
   // Clean up stale KuzuDB files from before the LadybugDB migration.
