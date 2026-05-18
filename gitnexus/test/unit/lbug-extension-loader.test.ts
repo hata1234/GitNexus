@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ExtensionManager,
   getExtensionInstallChildProcessArgs,
@@ -23,6 +23,17 @@ const timedOutInstall: ExtensionInstallResult = {
 };
 
 const noopWarn = (): void => {};
+
+const ENV_KEYS = [
+  'GITNEXUS_LBUG_EXTENSION_INSTALL',
+  'GITNEXUS_ALLOW_OUTBOUND_LBUG_EXTENSION_INSTALL',
+  'GITNEXUS_ALLOWED_LBUG_EXTENSIONS',
+  'GITNEXUS_ALLOWED_DUCKDB_EXTENSIONS',
+];
+
+afterEach(() => {
+  for (const key of ENV_KEYS) delete process.env[key];
+});
 
 describe('ExtensionManager — LOAD-first behavior', () => {
   it('uses LOAD only and never invokes INSTALL when the extension is already available', async () => {
@@ -112,6 +123,23 @@ describe('ExtensionManager — install policies', () => {
     );
 
     expect(installExtension).not.toHaveBeenCalled();
+  });
+
+  it('requires extension allowlist before env policy auto can run INSTALL', async () => {
+    const installExtension = vi.fn().mockResolvedValue(okInstall);
+    const warn = vi.fn();
+    const manager = new ExtensionManager({ installExtension, warn });
+    const query = vi.fn().mockRejectedValue(new Error('Extension "fts" not found'));
+
+    process.env.GITNEXUS_LBUG_EXTENSION_INSTALL = 'auto';
+    process.env.GITNEXUS_ALLOW_OUTBOUND_LBUG_EXTENSION_INSTALL = '1';
+
+    await expect(manager.ensure(query, 'fts', 'FTS')).resolves.toBe(false);
+    expect(installExtension).not.toHaveBeenCalled();
+
+    process.env.GITNEXUS_ALLOWED_LBUG_EXTENSIONS = 'fts';
+    await expect(manager.ensure(query, 'fts', 'FTS')).resolves.toBe(false);
+    expect(installExtension).toHaveBeenCalledOnce();
   });
 
   it('returns false and warns when bounded install times out', async () => {

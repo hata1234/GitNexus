@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'node:url';
 import { LBUG_MAX_DB_SIZE } from './lbug-config.js';
 import { logger } from '../logger.js';
-import { isOutboundNetworkAllowed } from '../../security/local-policy.js';
+import { isLbugExtensionInstallAllowed } from '../../security/local-policy.js';
 
 const DEFAULT_EXTENSION_INSTALL_TIMEOUT_MS = 15_000;
 const EXTENSION_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
@@ -51,15 +51,11 @@ const alreadyAvailable = (message: string): boolean =>
   message.includes('already installed') ||
   message.includes('already exists');
 
-const resolvePolicyFromEnv = (): ExtensionInstallPolicy => {
+const resolvePolicyFromEnv = (extensionName: string): ExtensionInstallPolicy => {
   const raw = process.env.GITNEXUS_LBUG_EXTENSION_INSTALL;
-  if (raw === 'load-only' || raw === 'never' || raw === 'auto') return raw;
-  if (
-    process.env.GITNEXUS_ALLOW_LBUG_EXTENSION_INSTALL === '1' ||
-    isOutboundNetworkAllowed('lbug-extension-install')
-  ) {
-    return 'auto';
-  }
+  if (raw === 'load-only' || raw === 'never') return raw;
+  if (raw === 'auto') return isLbugExtensionInstallAllowed(extensionName) ? 'auto' : 'load-only';
+  if (isLbugExtensionInstallAllowed(extensionName)) return 'auto';
   return 'load-only';
 };
 
@@ -193,7 +189,7 @@ export class ExtensionManager {
       throw new Error(`Invalid DuckDB extension name: ${name}`);
     }
 
-    const policy = opts.policy ?? this.options.policy ?? resolvePolicyFromEnv();
+    const policy = opts.policy ?? this.options.policy ?? resolvePolicyFromEnv(name);
     const timeoutMs =
       opts.installTimeoutMs ?? this.options.installTimeoutMs ?? getExtensionInstallTimeoutMs();
     const warn = this.options.warn ?? ((msg: string) => logger.warn(msg));

@@ -9,6 +9,7 @@ import {
   findDeniedIndexFiles,
   isBearerTokenAuthorized,
   isHttpAuthRequired,
+  isLbugExtensionInstallAllowed,
   isLocalRepoPathAllowed,
   isMcpToolAllowed,
   isOutboundNetworkAllowed,
@@ -20,6 +21,9 @@ const KEYS = [
   'GITNEXUS_ALLOW_OUTBOUND',
   'GITNEXUS_ALLOW_OUTBOUND_PUBLISH',
   'GITNEXUS_ALLOW_OUTBOUND_HF_DOWNLOAD',
+  'GITNEXUS_ALLOW_OUTBOUND_LBUG_EXTENSION_INSTALL',
+  'GITNEXUS_ALLOWED_LBUG_EXTENSIONS',
+  'GITNEXUS_ALLOWED_DUCKDB_EXTENSIONS',
   'GITNEXUS_ALLOWED_OUTBOUND_CLONE_URLS',
   'GITNEXUS_ALLOWED_OUTBOUND_URLS',
   'GITNEXUS_ALLOWED_REPO_PATHS',
@@ -63,6 +67,20 @@ describe('local security policy', () => {
     expect(isOutboundNetworkAllowed('wiki-llm', 'https://github.com/o-buster/private-repo')).toBe(
       false,
     );
+  });
+
+  it('requires both outbound approval and extension allowlist for Ladybug extension install', () => {
+    expect(isLbugExtensionInstallAllowed('fts')).toBe(false);
+
+    process.env.GITNEXUS_ALLOW_OUTBOUND_LBUG_EXTENSION_INSTALL = '1';
+    expect(isLbugExtensionInstallAllowed('fts')).toBe(false);
+
+    process.env.GITNEXUS_ALLOWED_LBUG_EXTENSIONS = 'fts';
+    expect(isLbugExtensionInstallAllowed('fts')).toBe(true);
+    expect(isLbugExtensionInstallAllowed('VECTOR')).toBe(false);
+
+    process.env.GITNEXUS_ALLOWED_DUCKDB_EXTENSIONS = 'vector';
+    expect(isLbugExtensionInstallAllowed('VECTOR')).toBe(true);
   });
 
   it('allows any local repo path outside company mode when no path allowlist is configured', () => {

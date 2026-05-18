@@ -105,6 +105,35 @@ export const isOutboundNetworkAllowed = (feature: string, targetUrl?: string): b
   return allowed;
 };
 
+export const getAllowedLbugExtensions = (): string[] => [
+  ...splitList(process.env.GITNEXUS_ALLOWED_LBUG_EXTENSIONS),
+  ...splitList(process.env.GITNEXUS_ALLOWED_DUCKDB_EXTENSIONS),
+];
+
+export const isLbugExtensionInstallAllowed = (extensionName: string): boolean => {
+  const normalized = extensionName.trim().toLowerCase();
+  const allowedExtensions = getAllowedLbugExtensions().map((item) => item.toLowerCase());
+  const extensionAllowed =
+    allowedExtensions.includes('*') || allowedExtensions.includes(normalized);
+  const outboundAllowed =
+    isTruthyEnv(process.env.GITNEXUS_ALLOW_LBUG_EXTENSION_INSTALL) ||
+    isOutboundNetworkAllowed('lbug-extension-install');
+  const allowed = extensionAllowed && outboundAllowed;
+
+  audit({
+    type: 'lbug-extension-install-policy',
+    extension: normalized,
+    allowed,
+    reason: allowed
+      ? 'extension-and-outbound-allowlist'
+      : !extensionAllowed
+        ? 'extension-not-allowlisted'
+        : 'outbound-not-allowlisted',
+  });
+
+  return allowed;
+};
+
 export const assertOutboundNetworkAllowed = (feature: string, targetUrl: string): void => {
   if (!isOutboundNetworkAllowed(feature, targetUrl)) {
     throw new Error(
