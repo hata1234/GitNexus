@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'node:url';
 import { LBUG_MAX_DB_SIZE } from './lbug-config.js';
 import { logger } from '../logger.js';
+import { isOutboundNetworkAllowed } from '../../security/local-policy.js';
 
 const DEFAULT_EXTENSION_INSTALL_TIMEOUT_MS = 15_000;
 const EXTENSION_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
@@ -53,7 +54,13 @@ const alreadyAvailable = (message: string): boolean =>
 const resolvePolicyFromEnv = (): ExtensionInstallPolicy => {
   const raw = process.env.GITNEXUS_LBUG_EXTENSION_INSTALL;
   if (raw === 'load-only' || raw === 'never' || raw === 'auto') return raw;
-  return 'auto';
+  if (
+    process.env.GITNEXUS_ALLOW_LBUG_EXTENSION_INSTALL === '1' ||
+    isOutboundNetworkAllowed('lbug-extension-install')
+  ) {
+    return 'auto';
+  }
+  return 'load-only';
 };
 
 export const getExtensionInstallTimeoutMs = (): number => {

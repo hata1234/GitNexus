@@ -17,6 +17,7 @@ import {
 import { streamAllCSVsToDisk } from './csv-generator.js';
 import type { CachedEmbedding } from '../embeddings/types.js';
 import { extensionManager, type ExtensionEnsureOptions } from './extension-loader.js';
+import { quoteCypherIdentifier, quoteCypherString } from './cypher-escape.js';
 import {
   closeLbugConnection,
   isDbBusyError,
@@ -146,7 +147,13 @@ export const splitRelCsvByLabelPair = async (
     await finished(inputStream).catch(() => {});
   }
 
-  return { relHeader, relsByPairMeta, pairWriteStreams, skippedRels, totalValidRels };
+  return {
+    relHeader,
+    relsByPairMeta,
+    pairWriteStreams,
+    skippedRels,
+    totalValidRels,
+  };
 };
 
 let db: lbug.Database | null = null;
@@ -592,7 +599,7 @@ const BACKTICK_TABLES = new Set([
 ]);
 
 const escapeTableName = (table: string): string => {
-  return BACKTICK_TABLES.has(table) ? `\`${table}\`` : table;
+  return quoteCypherIdentifier(table, BACKTICK_TABLES.has(table));
 };
 
 /** Fallback: insert relationships one-by-one if COPY fails */
@@ -602,9 +609,8 @@ const fallbackRelationshipInserts = async (
   getNodeLabel: (id: string) => string,
 ) => {
   if (!conn) return;
-  const escapeLabel = (label: string): string => {
-    return BACKTICK_TABLES.has(label) ? `\`${label}\`` : label;
-  };
+  const escapeLabel = (label: string): string =>
+    quoteCypherIdentifier(label, BACKTICK_TABLES.has(label));
 
   for (let i = 1; i < validRelLines.length; i++) {
     const line = validRelLines[i];
@@ -619,14 +625,12 @@ const fallbackRelationshipInserts = async (
       const confidence = parseFloat(confidenceStr) || 1.0;
       const step = parseInt(stepStr) || 0;
 
-      const esc = (s: string) =>
-        s.replace(/'/g, "''").replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
       await queryAndDrain(
         conn,
         `
-        MATCH (a:${escapeLabel(fromLabel)} {id: '${esc(fromId)}' }),
-              (b:${escapeLabel(toLabel)} {id: '${esc(toId)}' })
-        CREATE (a)-[:${REL_TABLE_NAME} {type: '${esc(relType)}', confidence: ${confidence}, reason: '${esc(reason)}', step: ${step}}]->(b)
+        MATCH (a:${escapeLabel(fromLabel)} {id: ${quoteCypherString(fromId)} }),
+              (b:${escapeLabel(toLabel)} {id: ${quoteCypherString(toId)} })
+        CREATE (a)-[:${REL_TABLE_NAME} {type: ${quoteCypherString(relType)}, confidence: ${confidence}, reason: ${quoteCypherString(reason)}, step: ${step}}]->(b)
       `,
       );
     } catch {
@@ -927,7 +931,10 @@ export const executeWithReusedStatement = async (
   }
 };
 
-export const getLbugStats = async (): Promise<{ nodes: number; edges: number }> => {
+export const getLbugStats = async (): Promise<{
+  nodes: number;
+  edges: number;
+}> => {
   if (!conn) return { nodes: 0, edges: 0 };
 
   let totalNodes = 0;
@@ -1215,7 +1222,7 @@ export const deleteNodesForFile = async (
 
   try {
     let deletedNodes = 0;
-    const escapedPath = filePath.replace(/'/g, "''");
+    const filePathLiteral = quoteCypherString(filePath);
 
     // Delete nodes from each table that has filePath
     // DETACH DELETE removes the node and all its relationships
@@ -1227,7 +1234,7 @@ export const deleteNodesForFile = async (
         // First count how many we'll delete
         const tn = escapeTableName(tableName);
         const countResult = await targetConn!.query(
-          `MATCH (n:${tn}) WHERE n.filePath = '${escapedPath}' RETURN count(n) AS cnt`,
+          `MATCH (n:${tn}) WHERE n.filePath = ${filePathLiteral} RETURN count(n) AS cnt`,
         );
         const rows = await readQueryRows(countResult);
         const count = Number(rows[0]?.cnt ?? rows[0]?.[0] ?? 0);
@@ -1236,7 +1243,7 @@ export const deleteNodesForFile = async (
           // Delete nodes (and implicitly their relationships via DETACH)
           await queryAndDrain(
             targetConn!,
-            `MATCH (n:${tn}) WHERE n.filePath = '${escapedPath}' DETACH DELETE n`,
+            `MATCH (n:${tn}) WHERE n.filePath = ${filePathLiteral} DETACH DELETE n`,
           );
           deletedNodes += count;
         }
@@ -1249,7 +1256,7 @@ export const deleteNodesForFile = async (
     try {
       await queryAndDrain(
         targetConn!,
-        `MATCH (e:${EMBEDDING_TABLE_NAME}) WHERE e.nodeId STARTS WITH '${escapedPath}' DELETE e`,
+        `MATCH (e:${EMBEDDING_TABLE_NAME}) WHERE e.nodeId STARTS WITH ${filePathLiteral} DELETE e`,
       );
     } catch {
       // Embedding table may not exist or nodeId format may differ
@@ -1283,10 +1290,9 @@ export const queryImporters = async (targetFilePath: string): Promise<string[]> 
   if (!conn) {
     throw new Error('LadybugDB not initialized. Call initLbug first.');
   }
-  const escaped = targetFilePath.replace(/'/g, "''");
   const cypher = `
     MATCH (a)-[r:${REL_TABLE_NAME}]->(b)
-    WHERE r.type = 'IMPORTS' AND b.filePath = '${escaped}'
+    WHERE r.type = 'IMPORTS' AND b.filePath = ${quoteCypherString(targetFilePath)}
     RETURN DISTINCT a.filePath AS importer
   `;
   try {
@@ -1426,8 +1432,8 @@ export const createFTSIndex = async (
     return;
   }
 
-  const propList = properties.map((p) => `'${p}'`).join(', ');
-  const query = `CALL CREATE_FTS_INDEX('${tableName}', '${indexName}', [${propList}], stemmer := '${stemmer}')`;
+  const propList = properties.map((p) => quoteCypherString(p)).join(', ');
+  const query = `CALL CREATE_FTS_INDEX(${quoteCypherString(tableName)}, ${quoteCypherString(indexName)}, [${propList}], stemmer := ${quoteCypherString(stemmer)})`;
 
   try {
     await queryAndDrain(conn, query);
@@ -1496,17 +1502,20 @@ export const queryFTS = async (
   limit: number = 20,
   conjunctive: boolean = false,
 ): Promise<
-  Array<{ nodeId: string; name: string; filePath: string; score: number; [key: string]: any }>
+  Array<{
+    nodeId: string;
+    name: string;
+    filePath: string;
+    score: number;
+    [key: string]: any;
+  }>
 > => {
   if (!conn) {
     throw new Error('LadybugDB not initialized. Call initLbug first.');
   }
 
-  // Escape backslashes and single quotes to prevent Cypher injection
-  const escapedQuery = query.replace(/\\/g, '\\\\').replace(/'/g, "''");
-
   const cypher = `
-    CALL QUERY_FTS_INDEX('${tableName}', '${indexName}', '${escapedQuery}', conjunctive := ${conjunctive})
+    CALL QUERY_FTS_INDEX(${quoteCypherString(tableName)}, ${quoteCypherString(indexName)}, ${quoteCypherString(query)}, conjunctive := ${conjunctive})
     RETURN node, score
     ORDER BY score DESC
     LIMIT ${limit}
@@ -1545,7 +1554,10 @@ export const dropFTSIndex = async (tableName: string, indexName: string): Promis
   }
 
   try {
-    await queryAndDrain(conn, `CALL DROP_FTS_INDEX('${tableName}', '${indexName}')`);
+    await queryAndDrain(
+      conn,
+      `CALL DROP_FTS_INDEX(${quoteCypherString(tableName)}, ${quoteCypherString(indexName)})`,
+    );
   } catch {
     // Index may not exist
   } finally {

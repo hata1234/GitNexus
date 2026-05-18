@@ -13,8 +13,14 @@
  *   - https://gitnexus.vercel.app     → allowed
  *   - Everything else                 → rejected
  */
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { isAllowedOrigin } from '../../src/server/api.js';
+
+afterEach(() => {
+  delete process.env.GITNEXUS_COMPANY_MODE;
+  delete process.env.GITNEXUS_ALLOWED_WEB_ORIGINS;
+  delete process.env.GITNEXUS_ALLOW_OUTBOUND_WEB_ORIGIN;
+});
 
 // ─── No origin (non-browser / curl) ──────────────────────────────────
 
@@ -179,5 +185,23 @@ describe('isAllowedOrigin: rejected origins', () => {
     expect(isAllowedOrigin('http://192.168.1.100')).toBe(true);
     expect(isAllowedOrigin('https://10.0.0.50')).toBe(true);
     expect(isAllowedOrigin('http://172.16.5.1:3000')).toBe(true);
+  });
+});
+
+describe('isAllowedOrigin: company mode', () => {
+  it('rejects broad LAN origins unless explicitly allowlisted', () => {
+    process.env.GITNEXUS_COMPANY_MODE = '1';
+
+    expect(isAllowedOrigin('http://192.168.1.100')).toBe(false);
+    expect(isAllowedOrigin('https://gitnexus.vercel.app')).toBe(false);
+    expect(isAllowedOrigin('http://localhost:5173')).toBe(true);
+  });
+
+  it('allows configured web origins in company mode', () => {
+    process.env.GITNEXUS_COMPANY_MODE = '1';
+    process.env.GITNEXUS_ALLOWED_WEB_ORIGINS = 'https://gitnexus.internal.example';
+
+    expect(isAllowedOrigin('https://gitnexus.internal.example')).toBe(true);
+    expect(isAllowedOrigin('https://gitnexus.example.com')).toBe(false);
   });
 });

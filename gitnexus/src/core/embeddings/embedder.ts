@@ -29,6 +29,7 @@ import { isHttpMode, getHttpDimensions, httpEmbed } from './http-client.js';
 import { resolveEmbeddingConfig } from './config.js';
 import { applyHfEnvOverrides, isHfDownloadFailure, withHfDownloadRetry } from './hf-env.js';
 import { logger } from '../logger.js';
+import { isOutboundNetworkAllowed } from '../../security/local-policy.js';
 
 /**
  * Check whether the onnxruntime-node package that @huggingface/transformers
@@ -78,7 +79,10 @@ function isCudaAvailable(): boolean {
   // Primary: query the dynamic linker cache — covers all architectures,
   // distro layouts, and custom install paths registered with ldconfig
   try {
-    const out = execFileSync('ldconfig', ['-p'], { timeout: 3000, encoding: 'utf-8' });
+    const out = execFileSync('ldconfig', ['-p'], {
+      timeout: 3000,
+      encoding: 'utf-8',
+    });
     if (out.includes('libcublasLt.so.12')) return true;
   } catch {
     // ldconfig not available (e.g. non-standard container)
@@ -163,12 +167,14 @@ export const initEmbedder = async (
   initPromise = (async () => {
     try {
       // Configure transformers.js environment
-      env.allowLocalModels = false;
+      env.allowLocalModels = true;
       // Bridge user-controlled env vars to transformers.js: HF_HOME →
       // env.cacheDir, HF_ENDPOINT → env.remoteHost (#1205). Centralised in
       // applyHfEnvOverrides so the MCP embedder entry point behaves
       // identically.
       applyHfEnvOverrides(env);
+      (env as unknown as { allowRemoteModels?: boolean }).allowRemoteModels =
+        isOutboundNetworkAllowed('hf-download', env.remoteHost);
 
       const isDev = process.env.NODE_ENV === 'development';
       if (isDev) {

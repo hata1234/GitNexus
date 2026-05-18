@@ -20,6 +20,7 @@ import {
 import { silenceStdout, restoreStdout, realStderrWrite } from '../../core/lbug/pool-adapter.js';
 
 import { logger } from '../../core/logger.js';
+import { isOutboundNetworkAllowed } from '../../security/local-policy.js';
 // Model config
 const MODEL_ID = 'Snowflake/snowflake-arctic-embed-xs';
 
@@ -48,12 +49,14 @@ export const initEmbedder = async (): Promise<FeatureExtractionPipeline> => {
 
   initPromise = (async () => {
     try {
-      env.allowLocalModels = false;
+      env.allowLocalModels = true;
       // Bridge user-controlled env vars to transformers.js: HF_HOME →
       // env.cacheDir, HF_ENDPOINT → env.remoteHost (#1205). Centralised in
       // applyHfEnvOverrides so this MCP entry point behaves identically to
       // the analyze pipeline embedder.
       applyHfEnvOverrides(env);
+      (env as unknown as { allowRemoteModels?: boolean }).allowRemoteModels =
+        isOutboundNetworkAllowed('hf-download', env.remoteHost);
       const embeddingConfig = resolveEmbeddingConfig();
 
       logger.info('GitNexus: Loading embedding model (first search may take a moment)...');

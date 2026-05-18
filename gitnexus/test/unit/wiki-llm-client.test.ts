@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 
 // Import the function we'll add in the next step
 import {
@@ -92,7 +92,13 @@ describe('buildRequestUrl', () => {
 });
 
 describe('callLLM — auth header', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => {
+    process.env.GITNEXUS_ALLOW_OUTBOUND_WIKI_LLM = '1';
+  });
+  afterEach(() => {
+    delete process.env.GITNEXUS_ALLOW_OUTBOUND_WIKI_LLM;
+    vi.unstubAllGlobals();
+  });
 
   it('uses Authorization: Bearer for non-Azure endpoints', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
@@ -178,7 +184,13 @@ describe('callLLM — auth header', () => {
 });
 
 describe('callLLM — reasoning model params', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => {
+    process.env.GITNEXUS_ALLOW_OUTBOUND_WIKI_LLM = '1';
+  });
+  afterEach(() => {
+    delete process.env.GITNEXUS_ALLOW_OUTBOUND_WIKI_LLM;
+    vi.unstubAllGlobals();
+  });
 
   it('uses max_completion_tokens and strips temperature for reasoning models', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(
@@ -238,7 +250,13 @@ describe('callLLM — reasoning model params', () => {
 });
 
 describe('callLLM — Azure content_filter error', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => {
+    process.env.GITNEXUS_ALLOW_OUTBOUND_WIKI_LLM = '1';
+  });
+  afterEach(() => {
+    delete process.env.GITNEXUS_ALLOW_OUTBOUND_WIKI_LLM;
+    vi.unstubAllGlobals();
+  });
 
   it('throws a clear error when Azure returns content_filter 400', async () => {
     const fetchSpy = vi
@@ -287,7 +305,13 @@ describe('callLLM — Azure content_filter error', () => {
 });
 
 describe('readSSEStream — content_filter handling', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => {
+    process.env.GITNEXUS_ALLOW_OUTBOUND_WIKI_LLM = '1';
+  });
+  afterEach(() => {
+    delete process.env.GITNEXUS_ALLOW_OUTBOUND_WIKI_LLM;
+    vi.unstubAllGlobals();
+  });
 
   it('throws a clear error when finish_reason is content_filter', async () => {
     const streamContent = [

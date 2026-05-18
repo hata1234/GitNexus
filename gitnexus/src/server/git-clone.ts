@@ -12,6 +12,7 @@ import fs from 'fs/promises';
 import { isIP } from 'net';
 import { logger } from '../core/logger.js';
 import { parseRepoNameFromUrl } from '../storage/git.js';
+import { assertOutboundNetworkAllowed } from '../security/local-policy.js';
 
 /** Root directory for all cloned repositories. Targets must resolve inside this. */
 const CLONE_ROOT = path.resolve(path.join(os.homedir(), '.gitnexus', 'repos'));
@@ -400,6 +401,7 @@ export async function cloneOrPull(
   // the code path where the repo was cloned. Now it runs unconditionally,
   // preventing SSRF / blocked-host bypasses even when targetDir already exists.
   validateGitUrl(url);
+  assertOutboundNetworkAllowed('clone', url);
 
   const exists = await fs.access(path.join(safeTarget, '.git')).then(
     () => true,

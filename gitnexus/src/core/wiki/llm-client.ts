@@ -1,5 +1,6 @@
 import { logger } from '../logger.js';
 import { CircuitOpenError, ResilientFetchExhaustedError, resilientFetch } from 'gitnexus-shared';
+import { assertOutboundNetworkAllowed } from '../../security/local-policy.js';
 /**
  * LLM Client for Wiki Generation
  *
@@ -177,6 +178,7 @@ export async function callLLM(
 ): Promise<LLMResponse> {
   // Validate base URL before any fetch (CodeQL js/http-to-file-access)
   validateLLMBaseUrl(config.baseUrl);
+  assertOutboundNetworkAllowed('wiki-llm', config.baseUrl);
 
   const messages: Array<{ role: string; content: string }> = [];
   if (systemPrompt) {

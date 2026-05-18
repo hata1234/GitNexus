@@ -127,6 +127,7 @@ describe('publishCommand (no-token no-op)', () => {
     );
     originalToken = process.env[UNDERSTAND_QUICKLY_TOKEN_ENV];
     delete process.env[UNDERSTAND_QUICKLY_TOKEN_ENV];
+    process.env.GITNEXUS_ALLOW_OUTBOUND_PUBLISH = '1';
     exitCodeBefore = process.exitCode;
     process.exitCode = 0;
   });
@@ -137,6 +138,7 @@ describe('publishCommand (no-token no-op)', () => {
     } else {
       delete process.env[UNDERSTAND_QUICKLY_TOKEN_ENV];
     }
+    delete process.env.GITNEXUS_ALLOW_OUTBOUND_PUBLISH;
     process.exitCode = exitCodeBefore;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
@@ -147,7 +149,28 @@ describe('publishCommand (no-token no-op)', () => {
     });
 
     const { publishCommand } = await import('../../src/cli/publish.js');
-    await publishCommand(tempDir, { id: 'looptech-ai/understand-quickly', skipGit: true });
+    await publishCommand(tempDir, {
+      id: 'looptech-ai/understand-quickly',
+      skipGit: true,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(process.exitCode ?? 0).toBe(0);
+    fetchSpy.mockRestore();
+  });
+
+  it('exits 0 without firing a network call when outbound publish is not explicitly allowed', async () => {
+    process.env[UNDERSTAND_QUICKLY_TOKEN_ENV] = 'pat_test';
+    delete process.env.GITNEXUS_ALLOW_OUTBOUND_PUBLISH;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('publishCommand should NOT call fetch when outbound publish is disabled');
+    });
+
+    const { publishCommand } = await import('../../src/cli/publish.js');
+    await publishCommand(tempDir, {
+      id: 'looptech-ai/understand-quickly',
+      skipGit: true,
+    });
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(process.exitCode ?? 0).toBe(0);
@@ -193,6 +216,7 @@ describe('publishCommand response branches (MEDIUM 5)', () => {
     );
     originalToken = process.env[UNDERSTAND_QUICKLY_TOKEN_ENV];
     process.env[UNDERSTAND_QUICKLY_TOKEN_ENV] = 'pat_test';
+    process.env.GITNEXUS_ALLOW_OUTBOUND_PUBLISH = '1';
     exitCodeBefore = process.exitCode;
     process.exitCode = 0;
     fetchSpy = vi.spyOn(globalThis, 'fetch');
@@ -204,6 +228,7 @@ describe('publishCommand response branches (MEDIUM 5)', () => {
     } else {
       delete process.env[UNDERSTAND_QUICKLY_TOKEN_ENV];
     }
+    delete process.env.GITNEXUS_ALLOW_OUTBOUND_PUBLISH;
     process.exitCode = exitCodeBefore;
     vi.restoreAllMocks();
     await fs.rm(tempDir, { recursive: true, force: true });

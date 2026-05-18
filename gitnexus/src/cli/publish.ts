@@ -32,6 +32,7 @@ import {
 import { getGitRoot, getRemoteOriginUrl, getCurrentCommit } from '../storage/git.js';
 import { hasIndex } from '../storage/repo-manager.js';
 import { cliInfo, cliError } from './cli-message.js';
+import { isOutboundNetworkAllowed, outboundDisabledMessage } from '../security/local-policy.js';
 
 export interface PublishOptions {
   /** Override the auto-derived `owner/repo` id. */
@@ -55,6 +56,16 @@ export const publishCommand = async (
   inputPath?: string,
   options: PublishOptions = {},
 ): Promise<void> => {
+  if (!isOutboundNetworkAllowed('publish', UNDERSTAND_QUICKLY_DISPATCH_URL)) {
+    cliInfo(
+      `[understand-quickly] ${outboundDisabledMessage('publish dispatch', 'GITNEXUS_ALLOW_OUTBOUND_PUBLISH')}`,
+      {
+        skipped: 'outbound-disabled',
+      },
+    );
+    return;
+  }
+
   // ── 0. Token gate FIRST — guarantees true no-op without the token. ──
   // The README, CLI --help, and PR body all promise "exit 0 without
   // UNDERSTAND_QUICKLY_TOKEN". Doing the index/repo-root checks before

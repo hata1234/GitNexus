@@ -35,6 +35,11 @@ import { JobManager } from './analyze-job.js';
 import { assertString, escapeRegExp, BadRequestError, createRouteLimiter } from './validation.js';
 import { extractRepoName, getCloneDir, cloneOrPull } from './git-clone.js';
 import { logger, flushLoggerSync } from '../core/logger.js';
+import {
+  assertLocalRepoPathAllowed,
+  isCompanyMode,
+  isOutboundNetworkAllowed,
+} from '../security/local-policy.js';
 
 const _require = createRequire(import.meta.url);
 const pkg = _require('../../package.json');
@@ -62,13 +67,20 @@ export const isAllowedOrigin = (origin: string | undefined): boolean => {
     return true;
   }
 
-  if (
+  const isLoopback =
     origin.startsWith('http://localhost:') ||
     origin === 'http://localhost' ||
     origin.startsWith('http://127.0.0.1:') ||
     origin === 'http://127.0.0.1' ||
     origin.startsWith('http://[::1]:') ||
-    origin === 'http://[::1]' ||
+    origin === 'http://[::1]';
+
+  if (isCompanyMode() || process.env.GITNEXUS_ALLOWED_WEB_ORIGINS) {
+    return isLoopback || isOutboundNetworkAllowed('web-origin', origin);
+  }
+
+  if (
+    isLoopback ||
     origin === 'https://gitnexus.vercel.app'
   ) {
     return true;
@@ -1403,6 +1415,7 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
           res.status(400).json({ error: '"path" must not contain traversal sequences' });
           return;
         }
+        assertLocalRepoPathAllowed(repoLocalPath);
       }
 
       const job = jobManager.createJob({ repoUrl, repoPath: repoLocalPath });
