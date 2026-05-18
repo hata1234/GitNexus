@@ -121,6 +121,10 @@ export function streamSSE<T = unknown>(url: string, handlers: SSEHandlers<T>): A
         if (lastEventId) {
           headers['Last-Event-ID'] = lastEventId;
         }
+        const authToken = getBackendAuthToken();
+        if (authToken) {
+          headers.Authorization = `Bearer ${authToken}`;
+        }
 
         const response = await fetch(url, { signal: controller.signal, headers });
         if (!response.ok) {
@@ -204,6 +208,61 @@ export function streamSSE<T = unknown>(url: string, handlers: SSEHandlers<T>): A
 // ── Configuration ──────────────────────────────────────────────────────────
 
 let _backendUrl = 'http://localhost:4747';
+let _backendAuthToken: string | undefined;
+
+const envValue = (name: string): string | undefined => {
+  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+  return env?.[name];
+};
+
+const isTruthy = (value: string | undefined): boolean =>
+  value !== undefined && ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+
+const splitList = (value: string | undefined): string[] =>
+  (value ?? '')
+    .split(/[\n,]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+const isLoopbackOrigin = (parsed: URL): boolean =>
+  parsed.hostname === 'localhost' ||
+  parsed.hostname === '127.0.0.1' ||
+  parsed.hostname === '[::1]' ||
+  parsed.hostname === '::1';
+
+const isAllowedBackendOrigin = (parsed: URL): boolean => {
+  const companyMode = isTruthy(envValue('VITE_GITNEXUS_COMPANY_MODE'));
+  const allowlist = splitList(envValue('VITE_GITNEXUS_ALLOWED_BACKEND_ORIGINS'));
+  if (!companyMode && allowlist.length === 0) return true;
+  if (isLoopbackOrigin(parsed)) return true;
+  return allowlist.some((entry) => {
+    try {
+      const allowed = new URL(entry.includes('://') ? entry : `${parsed.protocol}//${entry}`);
+      return allowed.origin === parsed.origin;
+    } catch {
+      return false;
+    }
+  });
+};
+
+const getBackendAuthToken = (): string | undefined => {
+  if (_backendAuthToken) return _backendAuthToken;
+  const envToken = envValue('VITE_GITNEXUS_API_TOKEN');
+  if (envToken) return envToken;
+  try {
+    return window.localStorage.getItem('gitnexus.apiToken') || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const withAuthQuery = (url: string): string => {
+  const authToken = getBackendAuthToken();
+  if (!authToken) return url;
+  const parsed = new URL(url);
+  parsed.searchParams.set('token', authToken);
+  return parsed.toString();
+};
 
 /**
  * Validate that a backend URL is a safe http:// or https:// origin before
@@ -225,6 +284,11 @@ export function validateBackendUrl(url: string): void {
     // Use parsed.protocol only (scheme), not the full URL, to avoid leaking credentials.
     throw new Error(`Backend URL must use http:// or https:// (got ${parsed.protocol})`);
   }
+  if (!isAllowedBackendOrigin(parsed)) {
+    throw new Error(
+      'Backend URL is not allowlisted for this GitNexus web build. Set VITE_GITNEXUS_ALLOWED_BACKEND_ORIGINS to allow it.',
+    );
+  }
 }
 
 export const setBackendUrl = (url: string): void => {
@@ -234,6 +298,10 @@ export const setBackendUrl = (url: string): void => {
 };
 
 export const getBackendUrl = (): string => _backendUrl;
+
+export const setBackendAuthToken = (token: string | undefined): void => {
+  _backendAuthToken = token?.trim() || undefined;
+};
 
 /**
  * Normalize a user-entered server URL into a base URL suitable for setBackendUrl().
@@ -312,13 +380,18 @@ const fetchWithTimeout = async (
   }
 
   try {
+    const authToken = getBackendAuthToken();
+    const headers = new Headers(init.headers);
+    if (authToken && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${authToken}`);
+    }
     // Bounded retries + 5xx/429 handling are delegated to resilientFetch.
     // Method-aware budget: idempotent verbs retry once on transient
     // backend failures; mutations (POST/PATCH/PUT/DELETE) default to
     // single-attempt to avoid duplicate side effects.
     const response = await resilientFetch(
       url,
-      { ...init, signal },
+      { ...init, signal, headers },
       {
         breakerKey,
         retry: { maxAttempts, baseDelayMs: 250, capDelayMs: 1500 },
@@ -446,7 +519,7 @@ export const connectHeartbeat = (
 
   const connect = () => {
     if (closed) return;
-    es = new EventSource(`${_backendUrl}/api/heartbeat`);
+    es = new EventSource(withAuthQuery(`${_backendUrl}/api/heartbeat`));
     es.onopen = () => {
       if (!closed) {
         attempt = 0;

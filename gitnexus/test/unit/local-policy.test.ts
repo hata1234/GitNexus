@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
+  assertIndexAllowed,
   assertLocalRepoPathAllowed,
+  assertMcpToolAllowed,
+  findDeniedIndexFiles,
+  isBearerTokenAuthorized,
+  isHttpAuthRequired,
   isLocalRepoPathAllowed,
+  isMcpToolAllowed,
   isOutboundNetworkAllowed,
   isTruthyEnv,
 } from '../../src/security/local-policy.js';
@@ -14,7 +23,14 @@ const KEYS = [
   'GITNEXUS_ALLOWED_OUTBOUND_CLONE_URLS',
   'GITNEXUS_ALLOWED_OUTBOUND_URLS',
   'GITNEXUS_ALLOWED_REPO_PATHS',
+  'GITNEXUS_ALLOWED_MCP_TOOLS',
+  'GITNEXUS_API_TOKEN',
+  'GITNEXUS_ALLOW_MCP_WRITE_TOOLS',
+  'GITNEXUS_ALLOW_INDEX_DENYLIST_BYPASS',
   'GITNEXUS_COMPANY_MODE',
+  'GITNEXUS_ENFORCE_INDEX_DENYLIST',
+  'GITNEXUS_REQUIRE_AUTH',
+  'GITNEXUS_SECURITY_AUDIT_LOG',
 ];
 
 describe('local security policy', () => {
@@ -68,6 +84,46 @@ describe('local security policy', () => {
     expect(isTruthyEnv('on')).toBe(true);
     expect(isTruthyEnv('0')).toBe(false);
     expect(isTruthyEnv(undefined)).toBe(false);
+  });
+
+  it('requires HTTP auth for non-loopback company-mode serving', () => {
+    process.env.GITNEXUS_COMPANY_MODE = '1';
+    expect(isHttpAuthRequired('127.0.0.1')).toBe(false);
+    expect(isHttpAuthRequired('0.0.0.0')).toBe(true);
+
+    process.env.GITNEXUS_API_TOKEN = 'secret';
+    expect(isBearerTokenAuthorized('Bearer secret', undefined, undefined)).toBe(true);
+    expect(isBearerTokenAuthorized(undefined, 'secret', undefined)).toBe(true);
+    expect(isBearerTokenAuthorized('Bearer wrong', undefined, undefined)).toBe(false);
+  });
+
+  it('keeps company-mode MCP read-only by default', () => {
+    process.env.GITNEXUS_COMPANY_MODE = '1';
+    expect(isMcpToolAllowed('query', true)).toBe(true);
+    expect(isMcpToolAllowed('rename', false)).toBe(false);
+    expect(() => assertMcpToolAllowed('rename', false)).toThrow('disabled');
+
+    process.env.GITNEXUS_ALLOWED_MCP_TOOLS = 'rename';
+    expect(isMcpToolAllowed('rename', false)).toBe(true);
+  });
+
+  it('finds sensitive files before indexing when the denylist is enforced', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-policy-'));
+    process.env.GITNEXUS_ENFORCE_INDEX_DENYLIST = '1';
+    try {
+      await fs.writeFile(path.join(tmp, '.env'), 'TOKEN=secret');
+      await fs.mkdir(path.join(tmp, 'src'));
+      await fs.writeFile(path.join(tmp, 'src', 'index.ts'), 'export const ok = true;');
+
+      const denied = await findDeniedIndexFiles(tmp);
+      expect(denied.map((item) => item.path)).toContain('.env');
+      await expect(assertIndexAllowed(tmp)).rejects.toThrow('Index denied');
+
+      process.env.GITNEXUS_ALLOW_INDEX_DENYLIST_BYPASS = '1';
+      await expect(assertIndexAllowed(tmp)).resolves.toBeUndefined();
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 });
 

@@ -43,6 +43,7 @@ import {
 import { PhaseTimer } from '../../core/search/phase-timer.js';
 import { checkStalenessAsync, checkCwdMatch } from '../../core/git-staleness.js';
 import { logger } from '../../core/logger.js';
+import { isLocalRepoPathAllowed, writeSecurityAudit } from '../../security/local-policy.js';
 // AI context generation is CLI-only (gitnexus analyze)
 // import { generateAIContextFiles } from '../../cli/ai-context.js';
 
@@ -278,6 +279,16 @@ export class LocalBackend {
 
     for (const entry of entries) {
       const id = this.repoId(entry.name, entry.path);
+      if (!isLocalRepoPathAllowed(entry.path)) {
+        writeSecurityAudit({
+          type: 'mcp-repo-scope-policy',
+          repo: entry.name,
+          path: path.resolve(entry.path),
+          allowed: false,
+          reason: 'repo-path-denylist',
+        });
+        continue;
+      }
       freshIds.add(id);
 
       const storagePath = entry.storagePath;

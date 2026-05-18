@@ -27,6 +27,7 @@ import { GITNEXUS_TOOLS } from './tools.js';
 import { installGlobalStdoutSentinel } from './stdio-context.js';
 import type { LocalBackend } from './local/local-backend.js';
 import { getResourceDefinitions, getResourceTemplates, readResource } from './resources.js';
+import { assertMcpToolAllowed, isMcpToolAllowed } from '../security/local-policy.js';
 
 /**
  * Next-step hints appended to tool responses.
@@ -154,7 +155,9 @@ export function createMCPServer(backend: LocalBackend): Server {
 
   // Handle list tools request
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: GITNEXUS_TOOLS.map((tool) => ({
+    tools: GITNEXUS_TOOLS.filter((tool) =>
+      isMcpToolAllowed(tool.name, tool.annotations.readOnlyHint === true),
+    ).map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
@@ -167,6 +170,8 @@ export function createMCPServer(backend: LocalBackend): Server {
     const { name, arguments: args } = request.params;
 
     try {
+      const tool = GITNEXUS_TOOLS.find((candidate) => candidate.name === name);
+      assertMcpToolAllowed(name, tool?.annotations.readOnlyHint === true);
       const result = await backend.callTool(name, args);
       const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
       const hint = getNextStepHint(name, args as Record<string, any> | undefined);

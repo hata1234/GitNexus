@@ -37,8 +37,12 @@ import { extractRepoName, getCloneDir, cloneOrPull } from './git-clone.js';
 import { logger, flushLoggerSync } from '../core/logger.js';
 import {
   assertLocalRepoPathAllowed,
+  isBearerTokenAuthorized,
   isCompanyMode,
+  isHttpAuthRequired,
+  isLocalRepoPathAllowed,
   isOutboundNetworkAllowed,
+  writeSecurityAudit,
 } from '../security/local-policy.js';
 
 const _require = createRequire(import.meta.url);
@@ -636,6 +640,12 @@ export const handleFileRequest = async (
 export const createServer = async (port: number, host: string = '127.0.0.1') => {
   const app = express();
   app.disable('x-powered-by');
+  const authRequired = isHttpAuthRequired(host);
+  if (authRequired && !process.env.GITNEXUS_API_TOKEN && !process.env.GITNEXUS_SERVER_TOKEN) {
+    throw new Error(
+      'GitNexus company mode requires GITNEXUS_API_TOKEN when serving on a non-localhost host.',
+    );
+  }
 
   // Trust X-Forwarded-* headers only when the connection comes from the
   // local loopback or RFC1918 private/link-local addresses — exactly the
@@ -806,6 +816,29 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
     res.json({ status: 'ok' });
   });
 
+  if (authRequired) {
+    app.use('/api', (req, res, next) => {
+      const queryToken = typeof req.query.token === 'string' ? req.query.token : undefined;
+      const headerToken =
+        typeof req.headers['x-gitnexus-token'] === 'string'
+          ? req.headers['x-gitnexus-token']
+          : undefined;
+      const allowed = isBearerTokenAuthorized(req.headers.authorization, headerToken, queryToken);
+      writeSecurityAudit({
+        type: 'http-auth-policy',
+        path: req.path,
+        method: req.method,
+        allowed,
+        reason: allowed ? 'token-match' : 'missing-or-invalid-token',
+      });
+      if (!allowed) {
+        res.status(401).json({ error: 'GitNexus API token required' });
+        return;
+      }
+      next();
+    });
+  }
+
   // SSE heartbeat — clients connect to detect server liveness instantly.
   // When the server shuts down, the TCP connection drops and the client's
   // EventSource fires onerror immediately (no polling delay).
@@ -848,7 +881,7 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
   // List all registered repos
   app.get('/api/repos', async (_req, res) => {
     try {
-      const repos = await listRegisteredRepos();
+      const repos = (await listRegisteredRepos()).filter((r) => isLocalRepoPathAllowed(r.path));
       res.json(
         repos.map((r) => ({
           name: r.name,
